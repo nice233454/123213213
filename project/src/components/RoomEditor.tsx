@@ -4,6 +4,8 @@ import Konva from 'konva';
 import { EditorObject, ToolType, Point, EditorState } from '../types/editor';
 import Toolbar from './Toolbar';
 import PropertiesPanel from './PropertiesPanel';
+import ProjectManager from './ProjectManager';
+import { Project, updateProject } from '../lib/supabase';
 
 const GRID_SIZE = 20;
 const WALL_THICKNESS = 10;
@@ -17,6 +19,10 @@ export default function RoomEditor() {
     scale: 1,
     offset: { x: 0, y: 0 },
   });
+
+  const [currentProjectId, setCurrentProjectId] = useState<string | null>(null);
+  const [currentProjectName, setCurrentProjectName] = useState('Untitled Project');
+  const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
 
   const stageRef = useRef<Konva.Stage>(null);
   const transformerRef = useRef<Konva.Transformer>(null);
@@ -222,8 +228,63 @@ export default function RoomEditor() {
         selectedId: null,
       }));
       selectedNodeRef.current = null;
+      setHasUnsavedChanges(true);
     }
   };
+
+  const handleLoadProject = (project: Project) => {
+    setState({
+      objects: project.data?.objects || [],
+      selectedId: null,
+      tool: 'select',
+      tempPoints: [],
+      scale: project.data?.scale || 1,
+      offset: project.data?.offset || { x: 0, y: 0 },
+    });
+    setCurrentProjectId(project.id);
+    setCurrentProjectName(project.name);
+    setHasUnsavedChanges(false);
+  };
+
+  const handleNewProject = () => {
+    if (hasUnsavedChanges && !confirm('You have unsaved changes. Create a new project anyway?')) {
+      return;
+    }
+    setState({
+      objects: [],
+      selectedId: null,
+      tool: 'select',
+      tempPoints: [],
+      scale: 1,
+      offset: { x: 0, y: 0 },
+    });
+    setCurrentProjectId(null);
+    setCurrentProjectName('Untitled Project');
+    setHasUnsavedChanges(false);
+  };
+
+  const handleProjectNameChange = (name: string) => {
+    setCurrentProjectName(name);
+    setHasUnsavedChanges(true);
+  };
+
+  useEffect(() => {
+    setHasUnsavedChanges(true);
+  }, [state.objects]);
+
+  useEffect(() => {
+    if (!currentProjectId || !hasUnsavedChanges) return;
+
+    const autoSaveTimer = setTimeout(async () => {
+      await updateProject(currentProjectId, {
+        name: currentProjectName,
+        data: { objects: state.objects, scale: state.scale, offset: state.offset },
+      });
+      setHasUnsavedChanges(false);
+    }, 2000);
+
+    return () => clearTimeout(autoSaveTimer);
+  }, [currentProjectId, currentProjectName, state.objects, state.scale, state.offset, hasUnsavedChanges]);
 
   return (
     <div className="flex h-screen bg-gray-50">
@@ -236,6 +297,16 @@ export default function RoomEditor() {
       />
 
       <div className="flex-1 relative overflow-hidden">
+        <ProjectManager
+          currentProjectId={currentProjectId}
+          currentProjectName={currentProjectName}
+          objects={state.objects}
+          scale={state.scale}
+          offset={state.offset}
+          onLoad={handleLoadProject}
+          onNewProject={handleNewProject}
+          onProjectNameChange={handleProjectNameChange}
+        />
         <Stage
           ref={stageRef}
           width={window.innerWidth - (selectedObject ? 400 : 100)}
